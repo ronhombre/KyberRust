@@ -6,10 +6,17 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 use crate::constants::{N_BYTES, SECRET_KEY_LENGTH};
 use crate::kem::encapsulate_internal;
 
-mod constants;
+#[cfg(all(not(debug_assertions), feature = "panic_handler"))]
+use core::panic::PanicInfo;
+
+pub mod constants;
 mod kybermath;
 
 mod generator;
+mod borrowed;
+
+#[cfg(feature = "ffi")]
+pub mod ffi;
 
 pub mod mlkem512;
 pub mod mlkem768;
@@ -743,4 +750,10 @@ impl<
         self.encapsulation_key.zeroize();
         self.decapsulation_key.zeroize();
     }
+}
+
+#[cfg(all(not(debug_assertions), feature = "panic_handler"))]
+#[panic_handler]
+fn panic(_info: &PanicInfo) -> ! {
+    loop {}
 }

@@ -1,6 +1,8 @@
 #![allow(clippy::needless_range_loop)] //Doesn't actually make sense here
+#![allow(dead_code)]
 
-use crate::{Kyber, FullBytes, KyberEncryptionKey, KyberDecryptionKey, KyberCipherText};
+use crate::{KyberEncryptionKey, KyberDecryptionKey, KyberCipherText, KyberParameter};
+use crate::borrowed::{EncryptionKeyRef, CipherTextRef};
 use crate::constants::*;
 use crate::kybermath;
 
@@ -19,6 +21,22 @@ pub fn to_cipher_text<
     plaintext: &mut [u8; SECRET_KEY_LENGTH],
     randomness: &mut [u8; SECRET_KEY_LENGTH]
 ) -> KyberCipherText<K, ETA1, ETA2, DU, DV> {
+    to_cipher_text_borrowed(
+        encryption_key.parameter,
+        EncryptionKeyRef { key: encryption_key.key.as_flattened(), ntt_seed: &encryption_key.ntt_seed },
+        plaintext,
+        randomness,
+    )
+}
+
+pub(crate) fn to_cipher_text_borrowed<
+    const K: usize, const ETA1: usize, const ETA2: usize, const DU: usize, const DV: usize,
+>(
+    parameter: KyberParameter<K, ETA1, ETA2, DU, DV>,
+    encryption_key: EncryptionKeyRef<'_>,
+    plaintext: &mut [u8; SECRET_KEY_LENGTH],
+    randomness: &mut [u8; SECRET_KEY_LENGTH],
+) -> KyberCipherText<K, ETA1, ETA2, DU, DV> {
     let mut constant_term = [0i32; N];
     let mut coefficients = [[0i32; N]; K];
 
@@ -28,7 +46,7 @@ pub fn to_cipher_text<
     for i in 0..K {
         kybermath::fast_byte_decode_into(
             &mut temp_buffer,
-            encryption_key.key.as_flattened(),
+            encryption_key.key,
             12,
             i * ENCODE_SIZE,
             ENCODE_SIZE,
@@ -50,7 +68,7 @@ pub fn to_cipher_text<
 
         for j in 0..K {
             let mut xof_stream = SHAKE_128::new_input_stream();
-            xof_stream.write_bytes(&encryption_key.ntt_seed);
+            xof_stream.write_bytes(encryption_key.ntt_seed);
             xof_stream.write_byte(j as u8);
             xof_stream.write_byte(i as u8);
             let mut xof_stream = xof_stream.close();
@@ -115,7 +133,7 @@ pub fn to_cipher_text<
     randomness.zeroize();
 
     KyberCipherText {
-        parameter: encryption_key.get_parameter(),
+        parameter,
         encoded_coefficients,
         encoded_terms
     }
@@ -131,16 +149,31 @@ pub fn from_cipher_text<
     decryption_key: &KyberDecryptionKey<K, ETA1, ETA2, DU, DV>,
     ciphertext: &KyberCipherText<K, ETA1, ETA2, DU, DV>
 ) -> [u8; SECRET_KEY_LENGTH] {
+    from_cipher_text_borrowed::<K, ETA1, ETA2, DU, DV>(
+        decryption_key.key.as_flattened(),
+        CipherTextRef {
+            coefficients: ciphertext.encoded_coefficients.as_flattened().as_flattened(),
+            terms: ciphertext.encoded_terms.as_flattened(),
+        },
+    )
+}
+
+pub(crate) fn from_cipher_text_borrowed<
+    const K: usize, const ETA1: usize, const ETA2: usize, const DU: usize, const DV: usize,
+>(
+    decryption_key: &[u8],
+    ciphertext: CipherTextRef<'_>,
+) -> [u8; SECRET_KEY_LENGTH] {
     let mut coefficients = [0i32; N];
 
     let mut secret_vector = [[0i32; N]; K];
     let secret_vector = secret_vector.as_flattened_mut();
     kybermath::fast_byte_decode_into(
         secret_vector,
-        decryption_key.key.as_flattened(),
+        decryption_key,
         12,
         0,
-        decryption_key.byte_length(),
+        decryption_key.len(),
         false
     );
     kybermath::vector_to_mont_vector(secret_vector);
@@ -148,7 +181,7 @@ pub fn from_cipher_text<
     let mut constant_terms = [0i32; N];
     kybermath::fast_byte_decode_into(
         &mut constant_terms,
-        ciphertext.encoded_terms.as_flattened(),
+        ciphertext.terms,
         DV,
         0,
         N_BYTES * DV,
@@ -160,9 +193,9 @@ pub fn from_cipher_text<
     for i in 0..K {
         kybermath::fast_byte_decode_into(
             &mut coefficients,
-            ciphertext.encoded_coefficients[i].as_flattened(),
+            ciphertext.coefficients,
             DU,
-            0,
+            i * N_BYTES * DU,
             N_BYTES * DU,
             true
         );

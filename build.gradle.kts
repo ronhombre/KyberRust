@@ -23,6 +23,7 @@ dependencies {
         defaultFeatures = false
     }
     crate(project(":keccakrust")) {
+        defaultFeatures = false
         features.add("standalone")
     }
     devCrate("hex:0.4.3")
@@ -38,11 +39,12 @@ rust {
     }
 
     features {
-        feature("default", "standalone")
+        feature("default", "standalone", "panic_handler")
         feature("standalone")
         feature("std", "rand/std_rng", "rand/sys_rng")
-        feature("ffi")
+        feature("ffi", "keccakrust/ffi")
         feature("executable", "dep:hex", "std")
+        feature("panic_handler")
     }
 
     profiles {
